@@ -77,7 +77,7 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "web" {
   name        = "${local.name_prefix}-web-sg"
-  description = "Autorise uniquement le trafic HTTP entrant ; pas de SSH (accès via SSM Session Manager)"
+  description = "Allow HTTP inbound only ; no SSH (access via SSM Session Manager)" # GroupDescription: ASCII only (AWS API constraint)
   vpc_id      = aws_vpc.main.id
 
   tags = merge(local.common_tags, { Name = "${local.name_prefix}-web-sg" })
@@ -94,7 +94,7 @@ resource "aws_vpc_security_group_ingress_rule" "http" {
 
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.web.id
-  description       = "Sortant complet requis (mises à jour système, clonage git, agents SSM/CloudWatch)" # checkov:skip=CKV_AWS_382 Sortant large nécessaire pour la mise à jour du site via git clone et les agents AWS ; POC sans VPC endpoints
+  description       = "Full outbound required (system updates, git clone, SSM/CloudWatch agents)" # checkov:skip=CKV_AWS_382 Sortant large necessaire pour la mise a jour du site via git clone et les agents AWS ; POC sans VPC endpoints
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1"
 }
