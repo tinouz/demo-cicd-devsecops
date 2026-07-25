@@ -4,7 +4,9 @@ Projet pédagogique : une chaîne CI/CD DevSecOps 100% open source, orchestrée
 par GitHub Actions, qui déploie un site statique nginx sur une infrastructure
 AWS minimaliste via Terraform.
 
-**Démo en ligne** : http://51.44.84.127
+> L'instance n'a pas d'IP fixe (pas d'Elastic IP, hors scope du POC) : elle
+> change à chaque recréation. Récupère l'URL courante avec
+> `terraform output site_url` (voir [`infra/README.md`](infra/README.md)).
 
 ## Objectif
 
