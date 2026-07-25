@@ -59,8 +59,8 @@ variable "github_repository" {
   type        = string
 }
 
-variable "github_oidc_subject" {
-  description = "Filtre du claim `sub` du token OIDC GitHub autorisé à assumer le rôle. Par défaut, restreint à toutes les refs du dépôt indiqué (branches, tags, PRs). Resserre par exemple à \"repo:org/repo:ref:refs/heads/main\" pour limiter au seul déploiement depuis `main`."
+variable "github_oidc_allowed_ref" {
+  description = "Si renseigné (ex: \"refs/heads/main\"), restreint le rôle OIDC à cette seule ref (claim `ref` du token GitHub), en plus du dépôt. Laisse à null pour autoriser toutes les refs du dépôt (branches, tags, PRs). La restriction au dépôt se fait via la claim `repository` (et non `sub`) pour rester robuste face au format `sub` avec IDs immuables (repo:owner@id/name@id:...) que GitHub peut activer."
   type        = string
   default     = null
 }

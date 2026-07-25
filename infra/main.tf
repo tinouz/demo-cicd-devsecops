@@ -14,8 +14,6 @@ locals {
 
   name_prefix = var.project_name
 
-  github_oidc_subject = coalesce(var.github_oidc_subject, "repo:${var.github_repository}:*")
-
   # Hash du contenu de /site : toute modification d'un fichier du site change
   # ce hash, qui est injecté (en commentaire, inerte pour bash) dans le
   # user_data. Combiné à `user_data_replace_on_change = true`, cela fait que
@@ -245,6 +243,19 @@ locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
 }
 
+locals {
+  # AWS exige que la trust policy d'un provider GitHub OIDC soit scopée via
+  # `sub` ou `job_workflow_ref` (pas uniquement via d'autres claims comme
+  # `repository`) : sinon UpdateAssumeRolePolicy/CreateRole rejette la policy
+  # ("must evaluate ... sub or job_workflow_ref which is not scoped to all").
+  # On utilise `job_workflow_ref` plutôt que `sub` car son format
+  # (owner/repo/.github/workflows/fichier.yml@ref) reste stable même si
+  # GitHub active les "immutable IDs" dans `sub`
+  # (repo:owner@id/repo@id:ref:...), qui a cassé une première version de ce
+  # trust policy basée sur `sub`.
+  github_oidc_job_workflow_ref = var.github_oidc_allowed_ref != null ? "${var.github_repository}/.github/workflows/*@${var.github_oidc_allowed_ref}" : "${var.github_repository}/.github/workflows/*"
+}
+
 resource "aws_iam_role" "github_actions" {
   name = "${local.name_prefix}-github-actions-deploy"
 
@@ -259,7 +270,7 @@ resource "aws_iam_role" "github_actions" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = local.github_oidc_subject
+          "token.actions.githubusercontent.com:job_workflow_ref" = local.github_oidc_job_workflow_ref
         }
       }
     }]

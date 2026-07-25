@@ -6,7 +6,7 @@ project_name = "demo-cicd"
 owner        = "ton-nom-ou-ton-equipe"
 
 github_repository = "ton-organisation-ou-user/ton-repo"
-# github_oidc_subject = "repo:ton-organisation-ou-user/ton-repo:ref:refs/heads/main"
+# github_oidc_allowed_ref = "refs/heads/main"
 
 # Doivent correspondre exactement aux valeurs passées à `terraform init -backend-config`
 state_bucket_name     = "ton-bucket-state-terraform"

@@ -83,9 +83,21 @@ Déclenché sur PR touchant `infra/**` ou `site/**` (plan) et sur push `main`
    l'approbation — évite qu'un état ait changé entre la revue et l'exécution.
 
 Le rôle IAM assumé (`github_actions_deploy`, voir `outputs.github_actions_role_arn`)
-est restreint par défaut à `repo:<github_repository>:*` via la condition
-OIDC `sub` — resserre-la via la variable `github_oidc_subject` (ex. à la
-branche `main` uniquement) si tu veux limiter le déploiement à un seul flux.
+est restreint par défaut à `<github_repository>` (toutes les refs — branches,
+tags, PR) via la claim OIDC `job_workflow_ref` — resserre via la variable
+`github_oidc_allowed_ref` (ex. `refs/heads/main`) si tu veux limiter le
+déploiement à un seul flux.
+
+> **Note** : le scoping se fait sur `job_workflow_ref`, pas sur `sub`.
+> AWS impose que la trust policy d'un provider GitHub OIDC soit scopée via
+> `sub` ou `job_workflow_ref` (sinon `CreateRole`/`UpdateAssumeRolePolicy`
+> est rejeté). `sub` a été écarté car son format change si GitHub active les
+> "immutable IDs" dans les claims (`repo:owner@123/repo@456:ref:...` au lieu
+> de `repo:owner/repo:ref:...`) — un filtre `sub` codé en dur casse alors
+> silencieusement l'authentification OIDC, ce qui s'est produit sur ce
+> projet dès le premier run du pipeline. `job_workflow_ref`
+> (`owner/repo/.github/workflows/fichier.yml@ref`) n'est pas affecté par ce
+> toggle.
 
 ### Secrets et variables GitHub Actions à configurer
 
