@@ -22,17 +22,27 @@ Avant tout `init`/`plan`, tu dois fournir :
 `terraform.tfvars` et `backend.hcl` sont dans `.gitignore` : ne les committe
 jamais.
 
-### Bootstrap du backend (une seule fois, manuel)
+### Bootstrap du backend (une seule fois)
 
 Le bucket S3 et la table DynamoDB du backend ne sont **pas** créés par ce
 code Terraform (problème classique de l'œuf et la poule : Terraform a besoin
-d'un backend pour s'initialiser). Crée-les une fois, manuellement ou via un
-petit script à part :
+d'un backend pour s'initialiser). Le script [`bootstrap-backend.sh`](bootstrap-backend.sh)
+les crée (versioning + chiffrement + accès public bloqué pour le bucket,
+clé `LockID` pour la table) :
 
-- Bucket S3 : versioning activé, chiffrement par défaut activé (SSE-S3 ou
-  SSE-KMS), accès public entièrement bloqué (Block Public Access).
-- Table DynamoDB : clé de partition `LockID` (type String), mode
-  `PAY_PER_REQUEST` suffit pour un usage aussi faible.
+```bash
+cd infra
+TF_STATE_BUCKET=ton-bucket TF_STATE_DYNAMODB_TABLE=ta-table AWS_REGION=eu-west-3 \
+  ./bootstrap-backend.sh create
+```
+
+Même script pour tout détruire proprement (vide le bucket versionné avant
+suppression) :
+
+```bash
+TF_STATE_BUCKET=ton-bucket TF_STATE_DYNAMODB_TABLE=ta-table AWS_REGION=eu-west-3 \
+  ./bootstrap-backend.sh destroy
+```
 
 ## Lancer un plan en local
 
