@@ -1,0 +1,14 @@
+# Copie ce fichier en backend.hcl (non versionné) et renseigne tes propres
+# valeurs, puis lance : terraform init -backend-config=backend.hcl
+#
+# Le bucket S3 et la table DynamoDB doivent exister au préalable (bootstrap
+# manuel, une seule fois — voir infra/README.md) :
+#   - bucket S3 : versioning activé, chiffrement par défaut (SSE-S3 ou
+#     SSE-KMS), accès public bloqué
+#   - table DynamoDB : clé de partition "LockID" (String)
+
+bucket         = "ton-bucket-state-terraform"
+key            = "demo-cicd/prod/terraform.tfstate"
+region         = "eu-west-3"
+dynamodb_table = "ta-table-dynamodb-lock"
+encrypt        = true

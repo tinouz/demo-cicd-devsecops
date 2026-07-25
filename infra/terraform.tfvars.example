@@ -1,0 +1,14 @@
+# Copie ce fichier en terraform.tfvars (non versionné) et renseigne tes
+# propres valeurs. Ne jamais committer terraform.tfvars.
+
+aws_region   = "eu-west-3"
+project_name = "demo-cicd"
+owner        = "ton-nom-ou-ton-equipe"
+
+github_repository = "ton-organisation-ou-user/ton-repo"
+# github_oidc_subject = "repo:ton-organisation-ou-user/ton-repo:ref:refs/heads/main"
+
+# Doivent correspondre exactement aux valeurs passées à `terraform init -backend-config`
+state_bucket_name     = "ton-bucket-state-terraform"
+state_bucket_key      = "demo-cicd/prod/terraform.tfstate"
+state_lock_table_name = "ta-table-dynamodb-lock"

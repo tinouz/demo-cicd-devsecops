@@ -1,0 +1,218 @@
+name: Terraform Infra (prod)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "site/**"
+      - ".github/workflows/terraform-infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "site/**"
+      - ".github/workflows/terraform-infra.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-infra-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: "1.15.6"
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+  TF_STATE_DYNAMODB_TABLE: ${{ vars.TF_STATE_DYNAMODB_TABLE }}
+  # Variables du module Terraform (préfixe TF_VAR_ = auto-consommé par Terraform)
+  TF_VAR_project_name: ${{ vars.TF_VAR_PROJECT_NAME }}
+  TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
+  TF_VAR_github_repository: ${{ github.repository }}
+  TF_VAR_state_bucket_name: ${{ vars.TF_STATE_BUCKET }}
+  TF_VAR_state_bucket_key: ${{ vars.TF_STATE_KEY }}
+  TF_VAR_state_lock_table_name: ${{ vars.TF_STATE_DYNAMODB_TABLE }}
+  TF_INPUT: "false"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Analyse statique de sécurité (SAST IaC) sur infra/. Non bloquant pour
+  # l'instant (soft_fail) : les résultats sont publiés dans l'onglet
+  # Security > Code scanning ; à durcir (soft_fail: false + seuil de
+  # sévérité) une fois le baseline de findings traité.
+  # ---------------------------------------------------------------------
+  checkov:
+    name: Checkov (infra)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra
+          framework: terraform
+          soft_fail: true
+          download_external_modules: false
+          output_format: cli,sarif
+          output_file_path: console,checkov-results.sarif
+
+      - name: Upload SARIF results to code scanning
+        if: always()
+        continue-on-error: true # tolère l'absence de GitHub Advanced Security (dépôts privés)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ---------------------------------------------------------------------
+  # Plan Terraform. Sur PR : commente le plan sur la PR. Sur push main :
+  # produit en plus l'artefact de plan consommé tel quel par le job apply
+  # (le plan appliqué est exactement celui qui a été généré à ce commit).
+  # ---------------------------------------------------------------------
+  terraform-plan:
+    name: Terraform Plan
+    needs: checkov
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    permissions:
+      contents: read
+      id-token: write # requis pour l'authentification OIDC vers AWS
+      pull-requests: write # requis pour commenter la PR avec le plan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_DYNAMODB_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan | tee plan_output.txt
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- terraform-plan-comment:infra -->';
+            let plan = fs.readFileSync('infra/plan_output.txt', 'utf8');
+            const maxLen = 60000;
+            if (plan.length > maxLen) {
+              plan = plan.slice(0, maxLen) + '\n... (plan tronqué, voir les logs du job pour le détail complet)';
+            }
+            const body = `${marker}\n### Terraform Plan — \`infra/\`\n\n<details><summary>Afficher le plan</summary>\n\n\`\`\`hcl\n${plan}\n\`\`\`\n\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload plan artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: infra/tfplan
+          retention-days: 1
+
+  # ---------------------------------------------------------------------
+  # Apply Terraform, uniquement sur push main, avec gate manuel via
+  # l'Environment GitHub "prod" (à configurer avec des reviewers requis
+  # dans Settings > Environments > prod > Deployment protection rules).
+  # Applique exactement le plan produit par le job précédent, pas un
+  # nouveau plan recalculé au moment de l'approbation.
+  # ---------------------------------------------------------------------
+  terraform-apply:
+    name: Terraform Apply (prod)
+    needs: terraform-plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    defaults:
+      run:
+        working-directory: infra
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_DYNAMODB_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod
+          path: infra
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
